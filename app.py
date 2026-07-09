@@ -20,14 +20,15 @@ def format_check(file_path, filename):
     failed_items = []
 
     # ----------------------------------------------------
-    # 1. 檢查檔名：必須符合「7X-XXX-文件三寶測驗」格式
+    # 1. 檢查檔名：支援 7X-XXX-文件三寶測驗 或 7X-XX-文件三寶測驗
     # ----------------------------------------------------
     pure_filename = filename.rsplit('.', 1)[0]
-    filename_pattern = r"^7[a-zA-Z\u4e00-\u9fa5]-[a-zA-Z0-9\u4e00-\u9fa5]+-文件三寶測驗$"
+    # 正規表示式：支援 7+一個英文或中文 + 槓 + (2碼或3碼數字/英中) + 槓 + 文件三寶測驗
+    filename_pattern = r"^7[a-zA-Z\u4e00-\u9fa5]-([a-zA-Z0-9\u4e00-\u9fa5]{2,3})-文件三寶測驗$"
     if re.match(filename_pattern, pure_filename):
-        passed_items.append("檔名規範：符合「7X-XXX-文件三寶測驗」格式。")
+        passed_items.append("檔名規範：符合「7X-XXX」或「7X-XX」之文件三寶測驗格式。")
     else:
-        failed_items.append(f"檔名規範：不符合格式（目前檔名為「{filename}」），應如 7A-102-文件三寶測驗。 (-5分)")
+        failed_items.append(f"檔名規範：不符合格式（目前檔名為「{filename}」），應如 7A-102-文件三寶測驗 或 7A-12-文件三寶測驗。 (-5分)")
         score -= 5
 
     # ----------------------------------------------------
@@ -41,8 +42,9 @@ def format_check(file_path, filename):
             
     if title_p:
         text = title_p.text
-        has_date = any(char.isdigit() for char in text)
         cleaned_text = text.replace("不同溶液中草履蟲的移動速度", "").replace("不同溶液下，草履蟲的移動速度", "").strip()
+        # 移除可能殘留的冒號
+        cleaned_text = cleaned_text.replace(":", "").replace("：", "").strip()
         
         if len(cleaned_text) >= 2:
             passed_items.append("基本資訊：標題旁已偵測到實驗者姓名與日期資訊。")
@@ -134,7 +136,7 @@ def format_check(file_path, filename):
         score -= 5
 
     # ----------------------------------------------------
-    # 6. 檢查粗體限制：只有指定四個部分為粗體
+    # 6. 檢查粗體限制：四個指定標題為粗體（忽略其中的冒號），其餘正常
     # ----------------------------------------------------
     bold_ok = True
     bold_targets = ["不同溶液", "一、目的", "二、器材", "三、步驟"]
@@ -144,34 +146,39 @@ def format_check(file_path, filename):
             continue
         is_target = any(target in p.text for target in bold_targets)
         for run in p.runs:
-            if not run.text.strip():
+            run_text = run.text.strip()
+            if not run_text:
                 continue
+            # 如果文字只是單純的冒號，跳過不檢查粗體
+            if run_text in [":", "："]:
+                continue
+                
             if is_target and run.bold is not True:
                 bold_ok = False
             if not is_target and run.bold is True:
                 bold_ok = False
 
     if bold_ok:
-        passed_items.append("粗體限制：只有指定的標題部分為粗體，其餘內文皆為正常體。")
+        passed_items.append("粗體限制：只有指定的標題部分為粗體（不計冒號），其餘內文皆為正常體。")
     else:
         failed_items.append("粗體限制：粗體設定不符規範（多設了粗體，或指定標題漏設粗體）。 (-5分)")
         score -= 5
 
     # ----------------------------------------------------
-    # 7. 檢查器材呈現：4*2 表格，文字靠左，無框線
+    # 7. 檢查器材呈現：改為 2*4 (2列4欄) 表格，文字靠左，無框線
     # ----------------------------------------------------
     if len(doc.tables) > 0:
         table = doc.tables[0]
         rows = len(table.rows)
         cols = len(table.columns)
         
-        table_shape_ok = (rows == 4 and cols == 2)
+        table_shape_ok = (rows == 2 and cols == 4)
         table_style_ok = "Border" in table.style.name or "Normal" in table.style.name or "Table Grid" in table.style.name
         
         if table_shape_ok:
-            passed_items.append(f"器材表格：已使用 4×2 表格呈現八個器材。")
+            passed_items.append(f"器材表格：已使用 2×4 表格呈現八個器材。")
         else:
-            failed_items.append(f"器材表格：表格行列數不對（規定 4列×2欄，偵測到為 {rows}列×{cols}欄）。 (-5分)")
+            failed_items.append(f"器材表格：表格行列數不對（規定 2列×4欄，偵測到為 {rows}列×{cols}欄）。 (-5分)")
             score -= 5
             
         if table_style_ok:
