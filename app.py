@@ -1,159 +1,138 @@
 import streamlit as st
 import docx
-from docx.shared import Pt, Cm
-import re
+from docx.shared import Cm, Pt
+import openai
+import os
 
-st.set_page_config(page_title="實驗報告格式檢查器", page_icon="📝")
+# 網頁標題設定
+st.set_page_config(page_title="慈文國中數資班word閱卷系統", page_icon="📝")
+st.title("📝 慈文國中數資班word閱卷系統")
+st.subheader("請上傳您的作業檔案 (.docx)，系統將進行嚴格的格式審查。")
 
-st.title("📝 實驗報告格式檢查系統")
-st.subheader("請上傳您的 Word 檔案 (.docx) 進行格式檢查")
+# 讓老師可以在網頁後台或側邊欄輸入 API Key (也可以在 Streamlit 設定中隱藏)
+api_key = st.sidebar.text_input("請輸入 OpenAI API Key", type="password")
 
-# 老師的規格常數設定
-TARGET_FONT_CHI = "標楷體"
-TARGET_FONT_ENG = "Times New Roman"
-TARGET_LINE_SPACING = 1.0
+uploaded_file = st.file_uploader("選擇上傳 Word 檔案 (.docx)", type=["docx"])
 
-# 檢查邏輯函式
-def check_report_format(file):
-    try:
-        doc = docx.Document(file)
-    except Exception as e:
-        return ["❌ 檔案讀取失敗，請確保上傳的是標準的 .docx 格式檔案。"], False
-
+# 解析 Word 格式的函數
+def analyze_docx(file_path):
+    doc = docx.Document(file_path)
     report = []
-    score = 100
     
-    # --- 1. 檢查頁面邊界 ---
-    section = doc.sections[0]
-    # 2.5 cm 約等於 0.984 英吋
-    margin_top = section.top_margin.cm
-    margin_bottom = section.bottom_margin.cm
-    margin_left = section.left_margin.cm
-    margin_right = section.right_margin.cm
-    
-    if all(abs(m - 2.5) < 0.1 for m in [margin_top, margin_bottom, margin_left, margin_right]):
-        report.append("✅ **頁面邊界**：符合規定 (上下左右皆為 2.5cm)")
-    else:
-        report.append(f"❌ **頁面邊界**：不符規定！目前為 上:{margin_top:.1f}cm, 下:{margin_bottom:.1f}cm, 左:{margin_left:.1f}cm, 右:{margin_right:.1f}cm (規定應為 2.5cm)")
-        score -= 10
+    # 1. 檢查邊界 (轉為公分)
+    sections = doc.sections
+    for i, section in enumerate(sections):
+        top = round(section.top_margin.cm, 2) if section.top_margin else "未知"
+        bottom = round(section.bottom_margin.cm, 2) if section.bottom_margin else "未知"
+        left = round(section.left_margin.cm, 2) if section.left_margin else "未知"
+        right = round(section.right_margin.cm, 2) if section.right_margin else "未知"
+        report.append(f"[版面邊界] 上:{top}cm, 下:{bottom}cm, 左:{left}cm, 右:{right}cm")
 
-    # --- 2. 檢查標題、姓名與日期 ---
-    first_para = doc.paragraphs[0] if doc.paragraphs else None
-    if first_para:
-        text = first_para.text
-        if "不同溶液中草履蟲的移動速度" in text:
-            # 檢查是否有姓名和日期（簡單判斷長度或關鍵字，因學生名字不固定，這裡檢查是否有其他文字與數字）
-            has_date = any(char.isdigit() for char in text)
-            if len(text) > 15 and has_date:
-                report.append("✅ **標題與基本資料**：標題正確，且已包含實驗者與日期。")
-            else:
-                report.append("❌ **標題與基本資料**：有看到標題，但**別忘記標題旁邊要有實驗者(你)和日期(今天)**！")
-                score -= 10
-        else:
-            report.append("❌ **標題**：第一行找不到正確的標題「不同溶液中草履蟲的移動速度」")
-            score -= 15
-
-    # --- 3. 檢查內文段落、字體、粗體、行距 ---
-    bold_keywords = ["不同溶液中草履蟲的移動速度", "一、目的", "二、器材", "三、步驟"]
-    font_error = False
-    color_error = False
-    spacing_error = False
-    bold_error = False
-    indent_error = False
-
-    for para in doc.paragraphs:
-        if not para.text.strip():
+    # 2. 檢查段落格式（行距、縮排、字體、字級、粗體）
+    report.append("\n[段落內文與格式明細]")
+    for i, p in enumerate(doc.paragraphs):
+        if not p.text.strip():
             continue
         
-        # 檢查行距
-        if para.paragraph_format.line_spacing and abs(para.paragraph_format.line_spacing - TARGET_LINE_SPACING) > 0.1:
-            spacing_error = True
-
-        # 檢查 步驟(一)~(五) 的縮排
-        if re.match(r"^\s*\(六*肌肉|一|二|三|四|五\)", para.text.strip()) and "三、步驟" not in para.text:
-            # 判斷是否有縮排（首行縮排或左縮排）
-            if not (para.paragraph_format.first_line_indent or para.paragraph_format.left_indent):
-                # 也有可能學生是用空格縮排
-                if not para.text.startswith("  ") and not para.text.startswith("　"):
-                    indent_error = True
-
-        # 檢查粗體與字體
-        is_keyword_para = any(kw in para.text for kw in bold_keywords)
+        # 行距與縮排
+        line_spacing = p.paragraph_format.line_spacing if p.paragraph_format.line_spacing else "預設(1.0)"
+        indent = p.paragraph_format.left_indent.paragraphs if p.paragraph_format.left_indent else 0
+        # 轉成字元大約值 (1字元約等於 0.423 公分或特定點數，這裡直接抓原始設定或交給 AI 輔助判斷)
         
-        for run in para.runs:
-            if not run.text.strip():
-                continue
+        # 讀取文字區塊的細部格式 (Run)
+        run_info = []
+        for run in p.runs:
+            font_name = run.font.name if run.font.name else "隨系統預設"
+            font_size = run.font.size.pt if run.font.size else "隨系統預設"
+            is_bold = run.bold if run.bold is not None else False
+            color = run.font.color.rgb if run.font.color else "預設黑色"
+            run_info.append(f"'{run.text}'(字體:{font_name}, 大小:{font_size}, 粗體:{is_bold}, 顏色:{color})")
             
-            # 粗體檢查
-            if is_keyword_para:
-                if any(kw in run.text for kw in bold_keywords) and not run.bold:
-                    bold_error = True
-            else:
-                if run.bold:
-                    bold_error = True
-            
-            # 顏色檢查 (預設或黑色皆可)
-            if run.font.color and run.font.color.rgb and run.font.color.rgb != docx.shared.RGBColor(0,0,0):
-                color_error = True
+        report.append(f"段落 {i+1}: {p.text} \n   -> 格式: 行距:{line_spacing}行, 詳細設定:[{', '.join(run_info)}]")
 
-    if spacing_error:
-        report.append("❌ **行距**：發現有段落不是 1.0 行行距。")
-        score -= 10
-    else:
-        report.append("✅ **行距**：全符合 1.0 行規定。")
-
-    if bold_error:
-        report.append("❌ **粗體規定**：格式不符。規定只有標題、「一、目的」、「二、器材」、「三、步驟」為粗體，其他應為正常字體。")
-        score -= 10
-    else:
-        report.append("✅ **粗體規定**：符合規定。")
-
-    if color_error:
-        report.append("❌ **文字顏色**：偵測到非黑色的文字或數字！")
-        score -= 10
-    else:
-        report.append("✅ **文字顏色**：全為黑色。")
-
-    if indent_error:
-        report.append("❌ **步驟縮排**：『三、步驟』下面的 (一)~(五) 必須縮排 2 個字元。")
-        score -= 10
-    else:
-        report.append("✅ **步驟縮排**：步驟縮排符合規定。")
-
-    # --- 4. 檢查表格 (器材 4x2 表格) ---
-    if len(doc.tables) > 0:
-        table = doc.tables[0]
+    # 3. 檢查表格結構
+    report.append("\n[文件內表格結構]")
+    for t_idx, table in enumerate(doc.tables):
         rows = len(table.rows)
         cols = len(table.columns)
-        
-        if rows == 4 and cols == 2:
-            report.append(f"✅ **器材表格**：成功使用 {rows}x{cols} 的表格呈現。")
-        else:
-            report.append(f"❌ **器材表格**：規格不符！規定要 4x2 表格，目前偵測到的是 {rows}x{cols}。")
-            score -= 15
-    else:
-        report.append("❌ **器材表格**：沒偵測到表格！八個器材請用 4*2 表格呈現。")
-        score -= 20
+        report.append(f"表格 {t_idx+1}: 共有 {rows} 列(Row) x {cols} 欄(Column)")
+        # 檢查框線 (docx 的 table.style.name 可以抓到是否為無框線或基本表格)
+        report.append(f"   -> 表格樣式名稱: {table.style.name}")
+        for r_idx, row in enumerate(table.rows):
+            row_text = [cell.text.strip() for cell in row.cells]
+            report.append(f"      第 {r_idx+1} 列文字: {row_text}")
 
-    return report, score
-
-# 網頁上傳介面
-uploaded_file = st.file_uploader("請選擇您的實驗報告 Word 檔案 (.docx)", type=["docx"])
+    return "\n".join(report)
 
 if uploaded_file is not None:
-    with st.spinner('正在檢查格式中，請稍候...'):
-        results, final_score = check_report_format(uploaded_file)
+    filename = uploaded_file.name
+    st.info(f"📁 已偵測到上傳檔名：{filename}")
+    
+    # 執行檔案格式解析
+    with st.spinner("正在抽取 Word 底層格式數據..."):
+        try:
+            docx_details = analyze_docx(uploaded_file)
+        except Exception as e:
+            st.error(f"檔案解析失敗，請確保是標準的 docx 檔案。錯誤訊息: {e}")
+            docx_details = None
+
+    if docx_details and api_key:
+        st.success("格式數據抽取成功！正在啟動 AI 閱卷老師評分...")
         
-        st.write("---")
-        st.header("📊 檢查結果報告")
-        
-        if final_score == 100:
-            st.balloons()
-            st.success(f"💯 太棒了！您的格式完全符合規定！得分：{final_score} 分")
-        elif final_score >= 60:
-            st.warning(f"⚠️ 檢查完成，部分格式有誤。得分：{final_score} 分")
-        else:
-            st.error(f"❌ 格式錯誤較多，請修正後重新上傳。得分：{final_score} 分")
+        # 建立結合了「標準」與「學生檔案實際格式」的 AI 提示詞
+        prompt = f"""
+你是一位嚴格的資訊課閱卷老師。請根據以下標準，針對學生上傳的 Word 文件「底層格式數據」與「檔名」進行格式審查。
+初始分數為 100 分，每發現一處未完成或不符規規定（包含文字打錯、不全、格式不對），請明確指出並「扣 5 分」，扣至 0 分為止。
+
+【嚴格格式檢核標準】
+1. 檔名：必須符合「7X-XXX-文件三寶測驗」格式（X為任意英文或中文字，例如 7A-102-文件三寶測驗）。
+2. 基本資訊：標題旁邊必須包含「實驗者姓名」與「日期」。
+3. 邊界與行距：上下左右邊界必須皆為 2.5cm（容許正負0.05cm微差），行距必須為 1.0 行。
+4. 字體與顏色：中文字全為「標楷體」，英文與數字全為「半形 Times New Roman」，文字與數字顏色皆為黑色（或預設黑）。
+5. 字級大小：只有標題是「14號字」，其餘所有內容（包含一二三、器材、步驟）皆為「12號字」。
+6. 粗體限制：只有「不同溶液下，草履蟲的移動速度」、「一、目的」、「二、器材」、「三、步驟」這四個部分為粗體（True），其餘所有內文必須為正常字體（False）。
+7. 器材呈現：八個器材必須使用 4*2 (4列2欄) 表格呈現，文字靠左對齊，且表格樣式必須是無框線（例如 Table Grid 且無外顯框線，或樣式名稱含 No Border/Normal）。
+8. 步驟縮排：「三、步驟」底下的 (一) 到 (五) 內文，每行開頭都必須縮排 2 個字元。
+
+-----------------------------------------
+【學生的檔案實際數據如下】
+檔案名稱: {filename}
+
+解析出來的底層 XML 格式報告:
+{docx_details}
+-----------------------------------------
+
+請根據上述實際數據，嚴格比對 1~8 點標準。
+請用以下格式輸出閱卷結果：
+
+### 👨‍🏫 閱卷老師評分報告
+- **最終得分**：[分數] 分
+
+#### 🟢 合格項目
+- （列出完全符合標準的項目與簡短稱讚）
+
+#### 🔴 不合格項目與扣分明細
+- （明確指出哪一條不符、實際數據是什麼、扣 5 分。例如：表格非4*2而是2*4，扣5分）
+"""
+
+        # 呼叫 OpenAI API (使用 gpt-4o 確保強大的推理解析能力)
+        try:
+            client = openai.OpenAI(api_key=api_key)
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": "你是一位精準、挑剔且絕對公正的學校資訊課閱卷評分機器人。"},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.0
+            )
             
-        for item in results:
-            st.write(item)
+            # 顯示結果
+            st.write("---")
+            st.markdown(response.choices[0].message.content)
+            
+        except Exception as e:
+            st.error(f"AI 連線失敗，請檢查 API Key 是否正確。錯誤報告: {e}")
+            
+    elif not api_key:
+        st.warning("⚠️ 請在左側欄位輸入您的 OpenAI API Key 才能啟動 AI 老師評分功能。")
