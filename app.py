@@ -260,11 +260,11 @@ def format_check(file_path, filename):
             # 判斷有無設定左側縮排或首行縮排
             has_indent = (p.paragraph_format.left_indent and p.paragraph_format.left_indent.pt > 0) or \
                          (p.paragraph_format.first_line_indent and p.paragraph_format.first_line_indent.pt > 0)
-            if has_indent:
-                pass
+            if has_indent:pass
             else:
                 indent_ok = False
 		missing_indent_steps.append(matched_pattern)
+
 	if indent_ok and not missing_indent_steps:
 		passed_items.append("步驟縮排：三、步驟底下的項目已正確設定縮排。")
 	else:
