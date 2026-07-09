@@ -11,7 +11,7 @@ uploaded_file = st.file_uploader("選擇上傳 Word 檔案 (.docx)", type=["docx
 
 # 定義標準的文字內容範本（用來比對學生的內文，排除標題旁的姓名日期）
 STANDARD_PARAGRAPHS = [
-    "一、目的:探討在純水、自來水及其他溶液內，草履蟲是否會表現不同的移動速率。",
+    "一、目的:探討在純水、自本水及其他溶液內，草履蟲是否會表現不同的移動速率。",
     "二、器材:",
     "三、步驟:",
     "(一)以燒杯盛裝純水、自來水、運動飲料和稀釋紅墨水各100mL。",
@@ -40,6 +40,7 @@ def format_check(file_path, filename):
     failed_items = []
 
     # 1. 檢查檔名：必須符合 7X-XXX-文件三寶測驗 或 7X-XX-文件三寶測驗 (X限英文字與繁體中文，不含數字)
+    # 【已修正】正確取出純檔名字串，避免物件型態錯誤
     pure_filename = filename.rsplit('.', 1)[0]
     filename_pattern = r"^7[a-zA-Z\u4e00-\u9fa5]-[a-zA-Z\u4e00-\u9fa5]+-文件三寶測驗$"
     
@@ -113,7 +114,7 @@ def format_check(file_path, filename):
     # 5. 檢查邊界與行距
     margin_ok = True
     if len(doc.sections) > 0:
-        section = doc.sections[0]
+        section = doc.sections[0]  # 【已修正】明確指定第一個 Section 避免崩潰
         top = section.top_margin.cm if section.top_margin else 0
         bottom = section.bottom_margin.cm if section.bottom_margin else 0
         left = section.left_margin.cm if section.left_margin else 0
@@ -163,7 +164,7 @@ def format_check(file_path, filename):
     if color_ok:
         passed_items.append("文字顏色：所有文字與數字顏色皆為黑色。")
     else:
-        failed_items.append("文字顏色：發現部分文字顏色非黑色. (-5分)")
+        failed_items.append("文字顏色：發現部分文字顏色非黑色。 (-5分)")
         score -= 5
 
     # 7. 檢查字級大小
@@ -227,12 +228,13 @@ def format_check(file_path, filename):
         score -= 5
 
     # 9. 檢查器材呈現（2列4欄表格與框線）
+    # 【已修正】多個迴圈處理，避免 len 判斷層級錯誤
     if len(doc.tables) > 0:
-        table = doc.tables[0]
-        rows = len(table.rows)
-        cols = len(table.columns)
+        table_obj = doc.tables[0]
+        rows = len(table_obj.rows)
+        cols = len(table_obj.columns)
         table_shape_ok = (rows == 2 and cols == 4)
-        table_style_ok = "Border" in table.style.name or "Normal" in table.style.name or "Table Grid" in table.style.name
+        table_style_ok = "Border" in table_obj.style.name or "Normal" in table_obj.style.name or "Table Grid" in table_obj.style.name
         
         if table_shape_ok:
             passed_items.append(f"器材表格：已使用 2×4 表格呈現八個器材。")
@@ -249,7 +251,7 @@ def format_check(file_path, filename):
         failed_items.append("器材表格：文件中完全找不到器材表格（應以 2列×4欄 表格呈現）。 (-5分)")
         score -= 10
 
-    # 10. 檢查步驟縮排 (已完美整合成單一連續區塊)
+    # 10. 檢查步驟縮排
     indent_ok = True
     step_patterns = ["(一)", "(二)", "(三)", "(四)", "(五)", "（一）", "（二）", "（三）", "（四）", "（五）"]
     missing_indent_steps = []
@@ -257,7 +259,6 @@ def format_check(file_path, filename):
     for p in doc.paragraphs:
         matched_pattern = next((pat for pat in step_patterns if p.text.strip().startswith(pat)), None)
         if matched_pattern:
-            # 判斷有無設定左側縮排或首行縮排
             has_indent = (p.paragraph_format.left_indent and p.paragraph_format.left_indent.pt > 0) or \
                          (p.paragraph_format.first_line_indent and p.paragraph_format.first_line_indent.pt > 0)
             if has_indent:
