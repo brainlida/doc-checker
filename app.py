@@ -263,8 +263,8 @@ def format_check(file_path, filename):
             if has_indent:
                 pass
             else:
-		indent_ok = False
-		missing_indent_steps.append(matched_pattern)
+                indent_ok = False
+                missing_indent_steps.append(matched_pattern)
 
         if indent_ok and not missing_indent_steps:
             passed_items.append("步驟縮排：三、步驟底下的項目已正確設定縮排。")
