@@ -261,16 +261,16 @@ def format_check(file_path, filename):
             has_indent = (p.paragraph_format.left_indent and p.paragraph_format.left_indent.pt > 0) or \
                          (p.paragraph_format.first_line_indent and p.paragraph_format.first_line_indent.pt > 0)
             if has_indent:
-		pass
+                pass
             else:
 		indent_ok = False
 		missing_indent_steps.append(matched_pattern)
 
-	if indent_ok and not missing_indent_steps:
-		passed_items.append("步驟縮排：三、步驟底下的項目已正確設定縮排。")
-	else:
-		failed_items.append(f"步驟縮排：三、步驟底下的項目未設定「縮排 2 字元」（系統偵測到未縮排的步驟有：{', '.join(missing_indent_steps) if missing_indent_steps else '所有步驟'}）。 (-5分)")
-		score -= 5
+        if indent_ok and not missing_indent_steps:
+            passed_items.append("步驟縮排：三、步驟底下的項目已正確設定縮排。")
+        else:
+            failed_items.append(f"步驟縮排：三、步驟底下的項目未設定「縮排 2 字元」（系統偵測到未縮排的步驟有：{', '.join(missing_indent_steps) if missing_indent_steps else '所有步驟'}）。 (-5分)")
+            score -= 5
 
     score = max(0, score)
     return score, passed_items, failed_items
