@@ -1,13 +1,35 @@
 import streamlit as st
 import docx
 import re
+import difflib
 
 # 網頁標題設定
 st.set_page_config(page_title="慈文國中數資班專題課 word測驗閱卷系統", page_icon="📝")
 st.title("📝 慈文國中數資班專題課 word測驗閱卷系統")
-st.subheader("請上傳您的作業檔案 (.docx)，系統將進行格式審查。")
+st.subheader("請上傳您的作業檔案 (.docx)，系統將進行格式與文字內容審查。")
 
 uploaded_file = st.file_uploader("選擇上傳 Word 檔案 (.docx)", type=["docx"])
+
+# 定義標準的文字內容範本（用來比對學生的內文，排除標題旁的姓名日期）
+# 這裡每一行代表一個標準段落
+STANDARD_PARAGRAPHS = [
+    "一、目的:探討在純水、自來水及其他溶液內，草履蟲是否會表現不同的移動速率。",
+    "二、器材:",
+    "三、步驟:",
+    "(一)以燒杯盛裝純水、自來水、運動飲料和稀釋紅墨水各100mL。",
+    "(二)各滴入1 mL的草履蟲水樣，並均勻混合。",
+    "(三)以滴管取含有草履蟲的純水，置於複式顯微鏡下觀察並錄影。",
+    "(四)以Tracker分析五隻草履蟲的移動速率，並記錄之。",
+    "(五)將純水依序換成自來水、運動飲料、稀釋紅墨水，重複步驟(二)~(四)。"
+]
+
+# 表格內標準的八個器材文字
+STANDARD_TABLE_CELLS = [
+    "(一)含有草履蟲的水樣 1杯", "(二)滴管 1支",
+    "(三)顯微鏡(含錄影裝備) 1組", "(四)純水 100mL",
+    "(五)自來水 100mL", "(六)運動飲料 100mL",
+    "(七)1:100稀釋紅墨水 100mL", "(八)Tracker(分析運動速率軟體) 1個"
+]
 
 def format_check(file_path, filename):
     try:
@@ -19,22 +41,25 @@ def format_check(file_path, filename):
     passed_items = []
     failed_items = []
 
-    # 1. 修正版檔名檢查：直接用正規表示式比對整串名稱
+    # 1. 檢查檔名
     pure_filename = filename.rsplit('.', 1)[0]
-    # 格式：7 + [純英中] + 槓 + [純英中1~5字] + 槓 + 文件三寶測驗
     filename_pattern = r"^7[a-zA-Z\u4e00-\u9fa5]-[a-zA-Z\u4e00-\u9fa5]+-文件三寶測驗$"
     
     if re.match(filename_pattern, pure_filename):
         passed_items.append("檔名規範：符合格式要求。")
     else:
         reason = "格式不符"
-        if any(char.isdigit() for char in pure_filename if char != '7'):
+        if "文書三寶" in pure_filename:
+            reason = "把「文件三寶」打成「文書三寶」了"
+        elif any(char.isdigit() for char in pure_filename if char != '7'):
             reason = "檔名除了開頭的7以外，其餘位置包含了不允許的「數字」"
-        failed_items.append(f"檔名規範：不符合格式（錯誤原因：{reason}）。正確應如 7E-解答-文件三寶測驗，中間不可有任何阿拉伯數字。 (-5分)")
+        failed_items.append(f"檔名規範：不符合格式（錯誤原因：{reason}）。正確應如 7E-解答-文件三寶測驗。 (-5分)")
         score -= 5
 
-    # 2. 檢查基本資訊
+    # 2. 檢查基本資訊（標題與姓名日期）
     title_p = None
+    student_paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+    
     for p in doc.paragraphs:
         if "不同溶液" in p.text:
             title_p = p
@@ -54,7 +79,45 @@ def format_check(file_path, filename):
         failed_items.append("基本資訊：找不到實驗標題「不同溶液中草履蟲的移動速度」。 (-5分)")
         score -= 5
 
-    # 3. 檢查邊界與行距
+    # 3. 檢查全文文字內容、標點、換行（精確比對）
+    content_errors = []
+    
+    # 移除學生內文中的標題行（因為標題行有姓名日期，不適合直接完全相同比對）
+    filtered_student_paras = [p for p in student_paragraphs if "不同溶液" not in p]
+    
+    # 檢查是否嚴重缺少段落（該換行沒換行，導致段落數不夠）
+    if len(filtered_student_paras) < len(STANDARD_PARAGRAPHS):
+        content_errors.append(f"文字與換行：偵測到段落缺失或漏掉換行。標準應有 {len(STANDARD_PARAGRAPHS)} 個段落，但僅偵測到 {len(filtered_student_paras)} 個段落。")
+    else:
+        # 逐個段落比對文字與標點
+        for idx, std_text in enumerate(STANDARD_PARAGRAPHS):
+            if idx < len(filtered_student_paras):
+                stud_text = filtered_student_paras[idx]
+                if stud_text != std_text:
+                    # 找出錯字細節
+                    content_errors.append(f"段落內容不符 -> 正確應該是:「{std_text}」 | 您的檔案寫成:「{stud_text}」")
+
+    # 4. 檢查表格內的器材文字是否精確相同
+    table_cells_text = []
+    if doc.tables:
+        for row in doc.tables[0].rows:
+            for cell in row.cells:
+                if cell.text.strip() and cell.text.strip() not in table_cells_text:
+                    table_cells_text.append(cell.text.strip())
+                    
+        # 比對表格文字內容
+        for std_cell in STANDARD_TABLE_CELLS:
+            if std_cell not in table_cells_text:
+                content_errors.append(f"器材表格文字不符 -> 找不到或打錯了器材名稱:「{std_cell}」")
+
+    if not content_errors:
+        passed_items.append("文字與標點：全文文字、標點符號、換行完全與題目要求一致，無任何增減。")
+    else:
+        for err in content_errors[:3]: # 最多顯示前三個錯字，避免畫面太長
+            failed_items.append(f"文字內容錯誤：{err} (-5分)")
+            score -= 5
+
+    # 5. 檢查邊界與行距
     margin_ok = True
     if doc.sections:
         section = doc.sections[0]
@@ -69,21 +132,19 @@ def format_check(file_path, filename):
             score -= 5
 
     spacing_ok = True
-    wrong_spacing_text = []
     for p in doc.paragraphs:
         if p.text.strip() and p.paragraph_format.line_spacing:
             if p.paragraph_format.line_spacing != 1.0 and p.paragraph_format.line_spacing_rule is not None:
                 spacing_ok = False
-                wrong_spacing_text.append(f"「{p.text[:10]}...」")
                 break
                 
     if margin_ok and spacing_ok:
         passed_items.append("版面邊界與行距：邊界 2.5cm 且行距為 1.0 行設定正確。")
     elif margin_ok and not spacing_ok:
-        failed_items.append(f"行距設定：部分內文段落行距非 1.0 行（例如：{', '.join(wrong_spacing_text)}）。 (-5分)")
+        failed_items.append("行距設定：部分內文段落行距非 1.0 行。 (-5分)")
         score -= 5
 
-    # 4. 檢查字體與顏色
+    # 6. 檢查字體與顏色
     font_ok = True
     color_ok = True
     wrong_fonts = []
@@ -112,7 +173,7 @@ def format_check(file_path, filename):
         failed_items.append("文字顏色：發現部分文字顏色非黑色。 (-5分)")
         score -= 5
 
-    # 5. 檢查字級大小
+    # 7. 檢查字級大小
     size_ok = True
     wrong_sizes = []
     for p in doc.paragraphs:
@@ -137,7 +198,7 @@ def format_check(file_path, filename):
         failed_items.append(f"字級大小：發現字號設定錯誤（例如：{', '.join(wrong_sizes[:2])}，規定標題14號、內文12號）。 (-5分)")
         score -= 5
 
-    # 6. 修正版粗體檢查：寬鬆比對機制（只要段落內有手動加粗或套用標題粗體樣式即認定通過）
+    # 8. 檢查粗體限制
     bold_ok = True
     bold_targets = ["不同溶液", "一、目的", "二、器材", "三、步驟"]
     missing_bold = []
@@ -146,13 +207,9 @@ def format_check(file_path, filename):
     for p in doc.paragraphs:
         if not p.text.strip():
             continue
-        
         is_target = any(target in p.text for target in bold_targets)
-        
-        # 檢查此段落是否含有任何手動粗體字元，或者段落樣式名稱內含 Heading(標題) 
         has_any_bold_run = any(run.bold is True for run in p.runs if run.text.strip() and run.text.strip() not in [":", "："])
         is_style_bold = "Heading" in p.style.name or "Heading" in str(p.style.base_style)
-        
         paragraph_is_bold = has_any_bold_run or is_style_bold
         
         if is_target and not paragraph_is_bold:
@@ -160,7 +217,6 @@ def format_check(file_path, filename):
             if f"「{p.text[:6]}...」" not in missing_bold:
                 missing_bold.append(f"「{p.text[:6]}...」")
         elif not is_target and paragraph_is_bold:
-            # 寬鬆政策：非目標段落，如果「整行都是粗體」才算錯，避免學生不小心只粗體了一兩個字被誤罰
             if all(run.bold is True for run in p.runs if run.text.strip()):
                 bold_ok = False
                 if f"「{p.text[:6]}...」" not in extra_bold:
@@ -177,12 +233,11 @@ def format_check(file_path, filename):
         failed_items.append(f"{err_msg} (-5分)")
         score -= 5
 
-    # 7. 檢查器材呈現（2列4欄）
+    # 9. 檢查器材呈現（2列4欄表格與框線）
     if len(doc.tables) > 0:
         table = doc.tables[0]
         rows = len(table.rows)
         cols = len(table.columns)
-        
         table_shape_ok = (rows == 2 and cols == 4)
         table_style_ok = "Border" in table.style.name or "Normal" in table.style.name or "Table Grid" in table.style.name
         
@@ -201,7 +256,7 @@ def format_check(file_path, filename):
         failed_items.append("器材表格：文件中完全找不到器材表格（應以 2列×4欄 表格呈現）。 (-5分)")
         score -= 10
 
-    # 8. 檢查步驟縮排
+    # 10. 檢查步驟縮排
     indent_ok = False
     step_patterns = ["(一)", "(二)", "(三)", "(四)", "(五)", "（一）", "（二）", "（三）", "（四）", "（五）"]
     missing_indent_steps = []
@@ -212,49 +267,3 @@ def format_check(file_path, filename):
             if (p.paragraph_format.left_indent and p.paragraph_format.left_indent.pt > 0) or \
                (p.paragraph_format.first_line_indent and p.paragraph_format.first_line_indent.pt > 0):
                 indent_ok = True
-            else:
-                missing_indent_steps.append(matched_pattern)
-                
-    if indent_ok and not missing_indent_steps:
-        passed_items.append("步驟縮排：三、步驟底下的項目已正確設定縮排。")
-    else:
-        failed_items.append(f"步驟縮排：三、步驟底下的項目未設定「縮排 2 字元」（系統偵測到未縮排的步驟有：{', '.join(missing_indent_steps) if missing_indent_steps else '所有步驟'}）。 (-5分)")
-        score -= 5
-
-    score = max(0, score)
-    return score, passed_items, failed_items
-
-if uploaded_file is not None:
-    filename = uploaded_file.name
-    st.info(f"📁 已偵測到上傳檔名：{filename}")
-    
-    with st.spinner("系統正在進行格式審查..."):
-        result = format_check(uploaded_file, filename)
-        
-        if result is None:
-            st.error("檔案解析失敗")
-        else:
-            score, passed, failed = result
-            st.write("---")
-            st.markdown("### 👨‍🏫 閱卷老師評分報告")
-            
-            if score >= 90:
-                st.success(f"### 最終得分：{score} 分")
-            elif score >= 60:
-                st.warning(f"### 最終得分：{score} 分")
-            else:
-                st.error(f"### 最終得分：{score} 分")
-                
-            st.markdown("#### 🟢 合格項目")
-            if passed:
-                for item in passed:
-                    st.write(f" - {item}")
-            else:
-                st.write("無項目合格。")
-                
-            st.markdown("#### 🔴 不合格項目與扣分明細")
-            if failed:
-                for item in failed:
-                    st.write(f" - {item}")
-            else:
-                st.write("🎉 太棒了！完美符合所有格式要求，沒有任何扣分！")
