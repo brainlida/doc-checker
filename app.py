@@ -5,8 +5,8 @@ import openai
 import os
 
 # 網頁標題設定
-st.set_page_config(page_title="慈文國中數資班word閱卷系統", page_icon="📝")
-st.title("📝 慈文國中數資班word閱卷系統")
+st.set_page_config(page_title="資訊課自動閱卷系統", page_icon="📝")
+st.title("📝 資訊課 - Word 文件三寶自動閱卷系統")
 st.subheader("請上傳您的作業檔案 (.docx)，系統將進行嚴格的格式審查。")
 
 # 讓老師可以在網頁後台或側邊欄輸入 API Key (也可以在 Streamlit 設定中隱藏)
