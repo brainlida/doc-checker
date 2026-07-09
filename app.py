@@ -275,26 +275,29 @@ def format_check(file_path, filename):
     score = max(0, score)
     return score, passed_items, failed_items
     if uploaded_file is not None:
-	filename = uploaded_file.namest.info(f"📁 已偵測到上傳檔名：{filename}")
+        filename = uploaded_file.namest.info(f"📁 已偵測到上傳檔名：{filename}")
     with st.spinner("系統正在進行格式與內文審查..."):
         result = format_check(uploaded_file, filename)
-    if result is None:st.error("檔案解析失敗")
+    if result is None:
+        st.error("檔案解析失敗")
     else:
-	score, passed, failed = result
-	st.write("---")
-	st.markdown("### 👨‍🏫 閱卷老師評分報告")
+        score, passed, failed = result
+        st.write("---")
+        st.markdown("### 👨‍🏫 閱卷老師評分報告")
     if score >= 90:
- 	st.success(f"### 最終得分：{score} 分")
+        st.success(f"### 最終得分：{score} 分")
     elif score >= 60:
-	st.warning(f"### 最終得分：{score} 分")
+        st.warning(f"### 最終得分：{score} 分")
     else:
-	st.error(f"### 最終得分：{score} 分")
+        st.error(f"### 最終得分：{score} 分")
     st.markdown("#### 🟢 合格項目")
     if passed:
-	for item in passed:st.write(f" - {item}")
+        for item in passed:
+            st.write(f" - {item}")
     else:st.write("無項目合格。")
     st.markdown("#### 🔴 不合格項目與扣分明細")
     if failed:
-	for item in failed:
-		st.write(f" - {item}")
-    else:st.write("🎉 太棒了！完美符合所有格式要求與文字內容，沒有任何扣分！")
+        for item in failed:
+            st.write(f" - {item}")
+    else:
+        st.write("🎉 太棒了！完美符合所有格式要求與文字內容，沒有任何扣分！")
