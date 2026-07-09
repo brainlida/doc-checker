@@ -19,20 +19,18 @@ def format_check(file_path, filename):
     passed_items = []
     failed_items = []
 
-    # 1. 檢查檔名
+    # 1. 修正版檔名檢查：直接用正規表示式比對整串名稱
     pure_filename = filename.rsplit('.', 1)[0]
-    filename_pattern = r"^7[a-zA-Z\u4e00-\u9fa5]-([a-zA-Z0-9\u4e00-\u9fa5]{2,3})-文件三寶測驗$"
+    # 格式：7 + [純英中] + 槓 + [純英中1~5字] + 槓 + 文件三寶測驗
+    filename_pattern = r"^7[a-zA-Z\u4e00-\u9fa5]-[a-zA-Z\u4e00-\u9fa5]+-文件三寶測驗$"
     
     if re.match(filename_pattern, pure_filename):
         passed_items.append("檔名規範：符合格式要求。")
     else:
         reason = "格式不符"
-        parts = pure_filename.split('-')
-        if len(parts) > 1 and any(char.isdigit() for char in parts[0]):
-            reason = "特定位置包含了不允許的「數字」"
-        elif len(parts) > 1 and any(char.isdigit() for char in parts[1]):
-            reason = "特定位置包含了不允許的「數字」"
-        failed_items.append(f"檔名規範：不符合格式（錯誤原因：{reason}）。正確應如 7A-霜霜-文件三寶測驗 或 7忠-丙丙-文件三寶測驗，中間不可有數字。 (-5分)")
+        if any(char.isdigit() for char in pure_filename if char != '7'):
+            reason = "檔名除了開頭的7以外，其餘位置包含了不允許的「數字」"
+        failed_items.append(f"檔名規範：不符合格式（錯誤原因：{reason}）。正確應如 7E-解答-文件三寶測驗，中間不可有任何阿拉伯數字。 (-5分)")
         score -= 5
 
     # 2. 檢查基本資訊
@@ -139,7 +137,7 @@ def format_check(file_path, filename):
         failed_items.append(f"字級大小：發現字號設定錯誤（例如：{', '.join(wrong_sizes[:2])}，規定標題14號、內文12號）。 (-5分)")
         score -= 5
 
-    # 6. 檢查粗體限制
+    # 6. 修正版粗體檢查：寬鬆比對機制（只要段落內有手動加粗或套用標題粗體樣式即認定通過）
     bold_ok = True
     bold_targets = ["不同溶液", "一、目的", "二、器材", "三、步驟"]
     missing_bold = []
@@ -148,23 +146,28 @@ def format_check(file_path, filename):
     for p in doc.paragraphs:
         if not p.text.strip():
             continue
+        
         is_target = any(target in p.text for target in bold_targets)
-        for run in p.runs:
-            run_text = run.text.strip()
-            if not run_text or run_text in [":", "："]:
-                continue
-                
-            if is_target and run.bold is not True:
-                bold_ok = False
-                if f"「{p.text[:6]}...」" not in missing_bold:
-                    missing_bold.append(f"「{p.text[:6]}...」")
-            if not is_target and run.bold is True:
+        
+        # 檢查此段落是否含有任何手動粗體字元，或者段落樣式名稱內含 Heading(標題) 
+        has_any_bold_run = any(run.bold is True for run in p.runs if run.text.strip() and run.text.strip() not in [":", "："])
+        is_style_bold = "Heading" in p.style.name or "Heading" in str(p.style.base_style)
+        
+        paragraph_is_bold = has_any_bold_run or is_style_bold
+        
+        if is_target and not paragraph_is_bold:
+            bold_ok = False
+            if f"「{p.text[:6]}...」" not in missing_bold:
+                missing_bold.append(f"「{p.text[:6]}...」")
+        elif not is_target and paragraph_is_bold:
+            # 寬鬆政策：非目標段落，如果「整行都是粗體」才算錯，避免學生不小心只粗體了一兩個字被誤罰
+            if all(run.bold is True for run in p.runs if run.text.strip()):
                 bold_ok = False
                 if f"「{p.text[:6]}...」" not in extra_bold:
                     extra_bold.append(f"「{p.text[:6]}...」")
 
     if bold_ok:
-        passed_items.append("粗體限制：只有指定的標題部分為粗體（不計冒號），其餘內文皆為正常體。")
+        passed_items.append("粗體限制：只有指定的標題部分為粗體，其餘內文皆為正常體。")
     else:
         err_msg = "粗體限制：粗體設定不符規範。"
         if missing_bold:
